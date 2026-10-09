@@ -1,0 +1,47 @@
+`timescale 1ns / 1ps
+
+module debounce(
+    input  wire clk,
+    input  wire rst,
+    input  wire btn,
+    output reg  btn_db
+);
+
+    reg [19:0] count;
+    reg btn_sync1;
+    reg btn_sync2;
+
+    always @(posedge clk or posedge rst) begin
+
+        if (rst) begin
+            count     <= 20'd0;
+            btn_sync1 <= 1'b0;
+            btn_sync2 <= 1'b0;
+            btn_db    <= 1'b0;
+        end
+
+        else begin
+
+            // Synchronize button
+            btn_sync1 <= btn;
+            btn_sync2 <= btn_sync1;
+
+            // Debounce
+            if (btn_sync2 == btn_db) begin
+                count <= 20'd0;
+            end
+            else begin
+
+                if (count == 20'd999_999) begin
+                    btn_db <= btn_sync2;
+                    count  <= 20'd0;
+                end
+                else begin
+                    count <= count + 1'b1;
+                end
+
+            end
+        end
+    end
+
+endmodule
