@@ -1,0 +1,390 @@
+module top(
+
+    input  wire  clk,
+    input  wire  rst,     
+    input  wire [15:0] sw,
+
+    input  wire  btnU,    // write
+    input  wire  btnD,    // read
+
+    output wire [9:0]  led,
+    output wire [3:0]  an,
+    output wire [6:0]  seg,
+
+    output wire pwm_out,
+
+    
+    output wire tx
+);
+
+
+
+wire wr_db;
+wire rd_db;
+
+wire wr_pulse;
+wire rd_pulse;
+
+
+
+wire psel;
+wire  penable;
+wire  pwrite;
+
+wire [7:0]  paddr;
+wire [7:0]  pwdata;
+
+wire [7:0]  prdata;
+
+wire        pready;
+wire        pslverr;
+
+wire [7:0]  read_data;
+
+wire  done;
+
+wire  error_sel;
+
+wire  start;
+wire    rw;
+
+
+
+wire uart_sel;
+wire fifo_sel;
+wire pwm_sel;
+
+
+
+
+wire fifo_full;
+wire  fifo_empty;
+
+wire fifo_wr_en;
+wire   fifo_rd_en;
+
+wire [7:0]  fifo_data_in;
+wire [7:0]  fifo_data_out;
+
+wire [7:0]  fifo_prdata;
+wire  fifo_pready;
+wire   fifo_pslverr;
+
+
+
+wire [7:0]  pwm_prdata;
+wire pwm_pready;
+wire pwm_pslverr;
+
+
+
+
+wire [7:0]  uart_prdata;
+wire        uart_pready;
+wire        uart_pslverr;
+
+wire [7:0]  uart_tx_data;
+wire        uart_tx_valid;
+
+wire        tx_tick;
+wire        rx_tick;
+wire        tx_busy;
+
+
+
+
+debounce D1(
+    .clk    (clk),
+    .rst    (rst),
+    .btn    (btnU),
+    .btn_db (wr_db)
+);
+
+debounce D2(
+    .clk    (clk),
+    .rst    (rst),
+    .btn    (btnD),
+    .btn_db (rd_db)
+);
+
+
+
+edge_detector E1(
+    .clk       (clk),
+    .rst       (rst),
+    .signal_in (wr_db),
+    .pulse     (wr_pulse)
+);
+
+edge_detector E2(
+    .clk       (clk),
+    .rst       (rst),
+    .signal_in (rd_db),
+    .pulse     (rd_pulse)
+);
+
+
+
+
+reg [15:0] sw_ff1;
+reg [15:0] sw_ff2;
+
+always @(posedge clk or posedge rst)
+begin
+    if(rst)
+    begin
+        sw_ff1 <= 16'h0000;
+        sw_ff2 <= 16'h0000;
+    end
+    else
+    begin
+        sw_ff1 <= sw;
+        sw_ff2 <= sw_ff1;
+    end
+end
+
+
+assign start = wr_pulse || rd_pulse;
+assign rw    = wr_pulse;
+
+apb3_master MASTER(
+
+    .clk(clk),
+    .rst(rst),
+
+    .start(start),
+    .rw(rw),
+
+    .command_data(sw_ff2),     // {sw[15:8] = data, sw[7:0] = address}
+
+    .pready(pready),
+    .pslverr(pslverr),
+
+    .prdata(prdata),
+
+    .psel(psel),
+    .penable(penable),
+    .pwrite(pwrite),
+
+    .paddr(paddr),
+    .pwdata(pwdata),
+
+    .read_data(read_data),
+
+    .done(done)
+  
+);
+
+
+
+
+apb3_decoder DEC(
+
+    .psel(psel),
+    .paddr(paddr),
+
+    .uart_sel(uart_sel),
+    .fifo_sel(fifo_sel),
+    .pwm_sel(pwm_sel),
+    .error_sel(error_sel)
+);
+
+
+
+apb_fifo_slave FIFO_SLAVE(
+
+    .clk(clk),
+    .rst(rst),
+
+    .psel(fifo_sel),
+    .penable(penable),
+    .pwrite(pwrite),
+
+    .pwdata(pwdata),
+
+    .prdata(fifo_prdata),
+    .pready(fifo_pready),
+    .fifo_pslverr(fifo_pslverr),
+
+    .wr_en(fifo_wr_en),
+    .rd_en(fifo_rd_en),
+
+    .data_in(fifo_data_in),
+    .data_out(fifo_data_out),
+
+    .full(fifo_full),
+    .empty(fifo_empty)
+);
+
+
+
+
+FIFO F1(
+
+    .clk(clk),
+    .rst(rst),
+
+    .wr_en(fifo_wr_en),
+    .rd_en(fifo_rd_en),
+
+    .data_in(fifo_data_in),
+    .data_out(fifo_data_out),
+
+    .full(fifo_full),
+    .empty(fifo_empty)
+);
+
+
+
+
+display_mux DISP(
+
+    .clk(clk),
+
+    .data(read_data),
+
+    .an(an),
+    .seg(seg)
+);
+
+
+ pwm_slave PWM(
+
+    .clk(clk),
+    .rst(rst),
+
+    .psel(pwm_sel),
+    .penable(penable),
+    .pwrite(pwrite),
+
+    .pwdata(pwdata),
+
+    .prdata(pwm_prdata),
+    .pready(pwm_pready),
+    .pwm_pslverr(pwm_pslverr),
+
+    .pwm_out(pwm_out)
+);
+
+
+
+uart_slave UART_SLAVE(
+
+    .PCLK(clk),
+    .PRESETn(~rst),
+
+    .PSEL(uart_sel),
+    .PENABLE(penable),
+    .PWRITE(pwrite),
+
+    .PADDR(paddr),
+    .PWDATA(pwdata),
+
+    .PRDATA(uart_prdata),
+    .PREADY(uart_pready),
+    .PSLVERR(uart_pslverr),
+
+    .uart_rx_data(8'h00),
+    .uart_rx_valid(1'b0),
+
+    .uart_tx_data(uart_tx_data),
+    .uart_tx_valid(uart_tx_valid)
+);
+
+
+
+assign pready =
+        uart_sel  ? uart_pready :
+        fifo_sel  ? fifo_pready :
+        pwm_sel   ? pwm_pready  :
+        error_sel ? penable     :
+                    1'b0;
+
+assign pslverr =
+        uart_sel  ? uart_pslverr :
+        fifo_sel  ? fifo_pslverr :
+        pwm_sel   ? pwm_pslverr  :
+        error_sel ? 1'b1         :
+                    1'b0;
+
+assign prdata =
+        uart_sel ? uart_prdata :
+        fifo_sel ? fifo_prdata :
+        pwm_sel  ? pwm_prdata  :
+                   8'h00;
+
+baud_generator #(
+
+    .CLK_FREQ  (100_000_000),
+    .BAUD_RATE (9600)
+
+)
+
+BAUD_GEN(
+
+    .clk(clk),
+    .rst(rst),
+
+    .rx_tick(rx_tick),
+    .tx_tick(tx_tick)
+);
+
+uart_transmitter UART_TX(
+
+    .clk(clk),
+    .rst(rst),
+
+    .tx_tick(tx_tick),
+
+    .data_in(uart_tx_data),
+    .tx_start(uart_tx_valid),
+
+    .tx(tx),
+    .tx_busy(tx_busy)
+);
+
+
+
+
+reg pready_latched;
+reg pslverr_latched;
+
+always @(posedge clk or posedge rst)
+begin
+    if(rst)
+    begin
+        pready_latched  <= 1'b0;
+        pslverr_latched <= 1'b0;
+    end
+    else
+    begin
+        if(start)
+        begin
+            pready_latched  <= 1'b0;
+            pslverr_latched <= 1'b0;
+        end
+        else if(psel && penable && pready)
+        begin
+            pready_latched  <= 1'b1;
+            pslverr_latched <= pslverr;
+        end
+    end
+end
+
+
+assign led[0] = psel;
+assign led[1] = penable;
+assign led[2] = pwrite;
+
+assign led[3] = pready_latched;
+assign led[4] = pslverr_latched;
+
+assign led[5] = wr_pulse;
+assign led[6] = rd_pulse;
+
+assign led[7] = fifo_full;
+assign led[8] = fifo_empty;
+
+assign led[9] = pwm_out;
+
+endmodule
